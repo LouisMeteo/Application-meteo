@@ -15,12 +15,17 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-with InfluxDBClient(url="your PLC", token="your token", org="pxc", verify_ssl=False) as client:
+with InfluxDBClient(url="https://192.168.100.118:8086", token="4KLniL0yjQbUgANSAHpWupBI3tAdt3-uOpyx3G5HgMQq1P3V9swssZk4J5SjS07gmAY6hV0iv9kST2S2ywwwHA==", org="pxc", verify_ssl=False) as client:
     write_api = client.write_api(write_options=SYNCHRONOUS)
 
 # 2 # 2 # 2 # 2 # 2 # 2 # 2 # 2 # 2 # 2 
 n=0
 production_n=0
+
+tarif_heures_pleines = 0.2323  # Prix du kWh en heures pleines de Total Direct Énergie
+tarif_heures_creuses = 0.1549  # Prix du kWh en heures creuses de Total Direct Énergie
+
+prix_kwh = tarif_heures_pleines
 ########################################################################################################
 # 3 # 3 # 3 # 3 # 3 # 3 # 3 # 3 # 3 # 3 
 @dataclass
@@ -47,9 +52,13 @@ class Meteo:
     production_n:float
     sunrise_time:int
     sunset_time:int
-    #heure_leve:time
-    #heure_couche:time
-    
+    onduleur_1:float
+    onduleur_2:float
+    onduleur_3:float
+    actual_time:int
+    prix_kwh:float
+    indice_fonctionement:int
+
 ########################################################################################################
 
 # 4 # 4 # 4 # 4 # 4 # 4 # 4 # 4 # 4 # 4 
@@ -89,13 +98,14 @@ def calcul_rayonnement_solaire(date, heure, latitude, longitude, orientation_cap
     
     return rayonnement_reel
 
-def meteo_site(city_name,location,orientation_capteur,inclinaison_capteur,production_n):
+def meteo_site(city_name,location,orientation_capteur,inclinaison_capteur,production_n,tarif_heures_pleines,tarif_heures_creuses):
 
-    api_key = "your api key"  # Enter the API key you got from the OpenWeatherMap website
+    api_key = "b5ab8d808a96802e903fdf1accce3f9b"  # Enter the API key you got from the OpenWeatherMap website
     base_url = "http://api.openweathermap.org/data/2.5/weather?"
 
     # 8 # 8 # 8 # 8 # 8 # 8 # 8 # 8 # 8 # 8 
     complete_url = base_url + "appid=" + 'd850f7f52bf19300a9eb4b0aa6b80f0d' + "&q=" + city_name  # This is to complete the base_url, you can also do this manually to checkout other weather data available
+
 
     # 11 # 11 # 11 # 11 # 11 # 11 # 11 # 11 
     response = requests.get(complete_url)
@@ -110,6 +120,8 @@ def meteo_site(city_name,location,orientation_capteur,inclinaison_capteur,produc
     heure_actuelle = datetime.datetime.now().time()
     print("Heure actuelle :", heure_actuelle)
     #print(x)
+
+    
 
     if x["cod"] != "404":
         y = x["main"]
@@ -140,18 +152,34 @@ def meteo_site(city_name,location,orientation_capteur,inclinaison_capteur,produc
         icon =z[0]["icon"]
         #print(icon)
 
+        if heure_actuelle.hour >= 22 or heure_actuelle.hour < 6:
+            prix_kwh = tarif_heures_creuses
+        else:
+            prix_kwh=tarif_heures_pleines
+        
         sunset_time =x['sys']['sunset']
         sunrise_time =x['sys']['sunrise']
         heure_leve = datetime.datetime.fromtimestamp(sunrise_time)
         heure_couche=datetime.datetime.fromtimestamp(sunset_time)
+        actual_time=int(time.time())
 
         # 13 # 13 # 13 # 13 # 13 # 13 # 13 # 13 
         rayonnement = calcul_rayonnement_solaire(date_actuelle, heure_actuelle, location.lat, location.lng, float(orientation_capteur), float(inclinaison_capteur))
         production=10*(rayonnement*25*0.2)*0.01 #on a 10m^2 de panneaux solaires avec un rendement de 20% | 0.007=25/3600   (on a une echelle de temps qui est 25s, et on avait des wh)
         production_n=production_n + production
         
+        onduleur_1 = (rayonnement +10)*1.5
+        onduleur_2= (rayonnement / 1.5)
+        onduleur_3 = (rayonnement +16)*0.4
+
+        if production==0:
+            indice_fonctionement=0
+        else :
+            indice_fonctionement=1
+
+
         # 14 # 14 # 14 # 14 # 14 # 14 # 14 # 14 
-        meteo=Meteo(str(city_name),int(orientation_capteur),int(inclinaison_capteur),float(current_temperature),float(temperature_felt),float(current_humidity),float(current_precipitations),float(current_wind_speed),float(wind_gust),float(wind_direction),float(rayonnement),float(weather_id),float(location.lat),float(location.lng),float(production), str(icon),str(weather_description), float(production_n),int(sunrise_time),int(sunset_time))
+        meteo=Meteo(str(city_name),int(orientation_capteur),int(inclinaison_capteur),float(current_temperature),float(temperature_felt),float(current_humidity),float(current_precipitations),float(current_wind_speed),float(wind_gust),float(wind_direction),float(rayonnement),float(weather_id),float(location.lat),float(location.lng),float(production), str(icon),str(weather_description), float(production_n),int(sunrise_time),int(sunset_time), float(onduleur_1),float(onduleur_2),float(onduleur_3),int(actual_time),float(prix_kwh),int(indice_fonctionement))
         print(meteo)
 
         # 15 # 15 # 15 # 15 # 15 # 15 # 15 # 15 
@@ -159,10 +187,12 @@ def meteo_site(city_name,location,orientation_capteur,inclinaison_capteur,produc
                 record=meteo,
                 record_measurement_name="meusures",
                 record_tag_keys=["localisation", "orientation","inclinaison"],
-                record_field_keys=["current_temperature","temperature_felt","current_humidity","current_precipitations","current_wind_speed","wind_gust","wind_direction","rayonnement","weather_id","lat","lon","production","icon","weather_description","production_n","sunrise_time","sunset_time"])
+                record_field_keys=["current_temperature","temperature_felt","current_humidity","current_precipitations","current_wind_speed","wind_gust","wind_direction","rayonnement","weather_id","lat","lon","production","icon","weather_description","production_n","sunrise_time","sunset_time","onduleur_1","onduleur_2","onduleur_3","actual_time","prix_kwh","indice_fonctionement"])
+
 
 
     return
+
 
 
 
@@ -182,12 +212,16 @@ orientation_capteur2 = input("Entrez l'orientation du capteur en degré :")  # O
 inclinaison_capteur2 = input("Entrez l'inclinaison du capteur en degré :")  # Inclinaison du capteur solaire (en degrés)
 
 
+
 while True:
     print("--------------------------------------")
     print("Site n°1\n")
-    meteo_site(city_name1,location1,orientation_capteur1,inclinaison_capteur1,production_n)
+    meteo_site(city_name1,location1,orientation_capteur1,inclinaison_capteur1,production_n,tarif_heures_pleines=0.2323,tarif_heures_creuses = 0.1549)
     print("--------------------------------------")
     print("Site n°2\n")
-    meteo_site(city_name2,location2,orientation_capteur2,inclinaison_capteur2,production_n)
+    meteo_site(city_name2,location2,orientation_capteur2,inclinaison_capteur2,production_n,tarif_heures_pleines=0.2323,tarif_heures_creuses = 0.1549)
+
+
 
     time.sleep(40)
+
