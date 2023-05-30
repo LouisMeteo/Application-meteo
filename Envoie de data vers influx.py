@@ -11,7 +11,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning) 
 
 # 3 # 3 # 3 # 3 # 3 # 3 # 3 # 3 # 3 # 3
-df = pd.read_csv('your csv file', sep=';') 
+df = pd.read_csv('data.scv', sep=';') #data.csv is available in the repository !
 
 # 4 # 4 # 4 # 4 # 4 # 4 # 4 # 4 # 4 # 4
 n=0                                                             
